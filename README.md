@@ -52,6 +52,111 @@ Results:
 
 ## Server 
 
+For the server side, I defined the same port for all the ports, being 2000.
+
+```c
+#define BROADCAST_UDP_CLIENT_DEST_PORT 2000
+```
+Then I configured using this port:
+```c
+static void udp_server_task(void *pvParameters)
+{
+    char rx_buffer[128];
+    char addr_str[128];
+    int addr_family = (int)pvParameters;
+    int ip_protocol = 0;
+    struct sockaddr_in6 dest_addr;
+
+    while (1)
+    {
+        struct sockaddr_in *dest_addr_ip4 = (struct sockaddr_in *)&dest_addr;
+        dest_addr_ip4->sin_addr.s_addr = htonl(INADDR_ANY);
+        dest_addr_ip4->sin_family = AF_INET;
+        dest_addr_ip4->sin_port = htons(BROADCAST_UDP_CLIENT_DEST_PORT);
+        ip_protocol = IPPROTO_IP;
+
+        int sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
+        if (sock < 0)
+        {
+            ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+            break;
+        }
+        ESP_LOGI(TAG, "Socket created");
+
+        // Set timeout
+        struct timeval timeout;
+        timeout.tv_sec = 10;
+        timeout.tv_usec = 0;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
+
+        int err = bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+        if (err < 0)
+        {
+            ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
+        }
+        ESP_LOGI(TAG, "Socket bound, port %d", BROADCAST_UDP_CLIENT_DEST_PORT);
+
+        struct sockaddr_storage source_addr; // Large enough for both IPv4 or IPv6
+        socklen_t socklen = sizeof(source_addr);
+
+        while (1)
+        {
+            ESP_LOGI(TAG, "Waiting for data");
+            int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
+
+            if (len > 0)
+            {
+                // Get the sender's ip address as string
+                inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
+                rx_buffer[len] = 0; // Null-terminate
+                ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
+                ESP_LOGI(TAG, "%s", rx_buffer);
+                sendto(sock, rx_buffer, len, 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
+            }
+            else
+            {
+                ESP_LOGI(TAG, "Did not received data");
+            }
+        }
+
+        if (sock != -1)
+        {
+            ESP_LOGE(TAG, "Shutting down socket and restarting...");
+            shutdown(sock, 0);
+            close(sock);
+        }
+    }
+    vTaskDelete(NULL);
+}
+```
+And in the main, I just called the task:
+
+```c
+void app_main(void)
+{
+    ESP_ERROR_CHECK(init_wifi());   
+    xTaskCreate(udp_server_task, "udp_server", 4096, (void *)AF_INET, 5, NULL);
+}
+```
+
+After flashing the code on the ESP board, it returned the following IP code (192.168.0.148):
+
+![image](https://github.com/Rafaelatff/ESP32-STA-UDP-Socket/assets/58916022/0a030817-793f-4232-a50f-2021dda99e12)
+
+In order to test, I use the `ncat` command (for UDP protocol):
+
+![erro-cmd-udp](https://github.com/Rafaelatff/ESP32-STA-UDP-Socket/assets/58916022/4c464c7b-a4a8-45f3-b7ac-fd82f816f8c9)
+
+To make it work, I had to install the [Nmap](https://nmap.org/download.html). After sending the command `ncat -u 192.168.0.148 2000` to the server again, it worked and also send me a echo:
+
+![funcionou](https://github.com/Rafaelatff/ESP32-STA-UDP-Socket/assets/58916022/8262d492-d5c8-4b07-9393-64ed8098397c)
+
+Since I want to work with broadcast messages, I change the server IP code for the broadcast IP (192.168.0.255) and it worked:
+
+![broadcast](https://github.com/Rafaelatff/ESP32-STA-UDP-Socket/assets/58916022/a92d4f02-587c-4b5d-b032-b454aa53f4c0)
+
+Now let's work on the client code!
+
 ## Client
 
 # Bibliography
