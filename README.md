@@ -159,6 +159,118 @@ Now let's work on the client code!
 
 ## Client
 
+The client must know the IP address that he wants to send the messages. By programming each board with the server code, I was able to know the IP address that my router addressed to them. To make code easy I alread prepared the defines with the IP addresses to test:
+
+```c
+#define BROADCAST_CLIENT_DEST_IP "192.168.0.255" // Class C Broadcast address
+
+#define GREEN_CLIENT_DEST_IP "192.168.0.148"  // Server IP Address
+#define BLUE_CLIENT_DEST_IP "192.168.0.216"  // Server IP Address
+#define PINK_CLIENT_DEST_IP "192.168.0.184"  // Server IP Address
+#define ORANGE_CLIENT_DEST_IP "192.168.1.102"  // Server IP Address
+#define YELLOW_CLIENT_DEST_IP "192.168.1.100"  // Server IP Address
+```
+Then the cliend code (is already with the broadcast IP):
+```c
+static void udp_client_task(void *pvParameters)
+{
+    char rx_buffer[128];
+    char host_ip[] = BROADCAST_CLIENT_DEST_IP;
+    //char host_ip[] = GREEN_CLIENT_DEST_IP;
+    int addr_family = 0;
+    int ip_protocol = 0;
+
+    while (1) {
+        struct sockaddr_in dest_addr;
+        dest_addr.sin_addr.s_addr = inet_addr(BROADCAST_CLIENT_DEST_IP);
+        //dest_addr.sin_addr.s_addr = inet_addr(GREEN_CLIENT_DEST_IP);
+        dest_addr.sin_family = AF_INET; 
+        dest_addr.sin_port = htons(BROADCAST_UDP_CLIENT_DEST_PORT);
+        addr_family = AF_INET; //
+        ip_protocol = IPPROTO_IP;
+
+        int sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
+        //int sock = socket(AF_INET, SOCK_DGRAM, 0);
+        if (sock < 0) {
+            ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+            //vTaskDelete(NULL);
+            break;
+        }
+
+        // Set timeout
+        struct timeval timeout;
+        timeout.tv_sec = 10;
+        timeout.tv_usec = 0;
+        setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
+
+        ESP_LOGI(TAG, "Socket created, sending to %s:%d", host_ip, BROADCAST_UDP_CLIENT_DEST_PORT);
+
+
+        while (1) {
+
+            int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+            if (err < 0) {
+                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+                break;
+            }
+            ESP_LOGI(TAG, "Message sent");
+
+            struct sockaddr_storage source_addr; // Large enough for both IPv4 or IPv6
+            socklen_t socklen = sizeof(source_addr);
+            int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
+
+            // Error occurred during receiving
+            if (len < 0) {
+                ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
+                break;
+            }
+            // Data received
+            else {
+                rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
+                ESP_LOGI(TAG, "Received %d bytes from %s:", len, host_ip);
+                ESP_LOGI(TAG, "%s", rx_buffer);
+                if (strncmp(rx_buffer, "OK: ", 4) == 0) {
+                    ESP_LOGI(TAG, "Received expected message, reconnecting");
+                    break;
+                }
+            }
+            vTaskDelay(5000 / portTICK_PERIOD_MS);
+        }
+
+        if (sock != -1) {
+            ESP_LOGE(TAG, "Shutting down socket and restarting...");
+            shutdown(sock, 0);
+            close(sock);
+        }
+    }
+    vTaskDelete(NULL);
+}
+```
+In the app_main I added the calling for the task:
+
+```c
+xTaskCreate(udp_client_task, "udp_client", 4096, NULL, 5, NULL);
+```
+First I tested sending to each ESP32 IP address separately. Then I program all the boards to send the broadcast message and leaved the GREEN on with the server being monitored. The result is as follow:
+
+![nomes coretos](https://github.com/Rafaelatff/ESP32-STA-UDP-Socket/assets/58916022/aa89225b-fa9d-47dd-a13e-6e84cce53a33)
+
+It worked!
+
+## Changing the ESP32 boards from STA to APSTA
+
+I started working only on the GREEN and BLUE boards. I started to have some difficulties and after checking with a coleague, he told me I should start working with mesh instead of this type of network. I will keep the codes in this repositorie in case I wish to return to this topology.
+
+When I was trying to connect one ESP32 board to another, it only returned me the following:
+
+![error](https://github.com/Rafaelatff/ESP32-STA-UDP-Socket/assets/58916022/6c349c12-ae19-492b-9ed8-43c1ea327307)
+
+![reason number 201](https://github.com/Rafaelatff/ESP32-STA-UDP-Socket/assets/58916022/fad2dc5c-c23e-42e9-9f50-3142874d4500)
+
+I guess I need time to improve the network configuration code (such as set the IPs for my network, since it doesn't have the DHCP server of the router anymore).
+
+Well I will focus on what is priority for my studies and then return here someday.
+
 # Bibliography
 
 During development, this content help me a lot:
